@@ -6,7 +6,7 @@ use futures::{pin_mut, task::Spawn, StreamExt};
 use mountpoint_s3_client::{types::ETag, ObjectClient};
 use tracing::{debug_span, error, trace, Instrument};
 
-use crate::object::{ChecksummedBytes, ObjectId, ObjectPart};
+use crate::object::{ObjectId, ObjectPart};
 use crate::prefetch::part_queue::unbounded_part_queue;
 use crate::prefetch::task::RequestTask;
 use crate::prefetch::PrefetchReadError;
@@ -205,8 +205,12 @@ where
                     match get_object_result.next().await {
                         Some(Ok((offset, body))) => {
                             trace!(offset, length = body.len(), "received GetObject part");
-                            // pre-split the body into multiple parts as suggested by preferred part size
-                            // in order to avoid validating checksum on large parts at read.
+                            // Ideally, we would get the checksum for `body` from the client, but that is
+                            // not generally available because S3 doesn't provide the checksum if the request
+                            // range is not aligned to object part boundaries, so we need to compute our own
+                            // checksum here.
+                            // Before computing it, we pre-split the body into multiple parts as suggested by
+                            // preferred part size in order to avoid validating checksum on large parts at read.
                             let mut body: Bytes = body.into();
                             let mut curr_offset = offset;
                             loop {
@@ -215,10 +219,7 @@ where
                                     break;
                                 }
                                 let chunk = body.split_to(chunk_size);
-                                // S3 doesn't provide checksum for us if the request range is not aligned to
-                                // object part boundaries, so we're computing our own checksum here.
-                                let checksum_bytes = ChecksummedBytes::new(chunk);
-                                let part = ObjectPart::new(id.clone(), curr_offset, checksum_bytes);
+                                let part = ObjectPart::new(id.clone(), curr_offset, chunk);
                                 curr_offset += part.len() as u64;
                                 part_queue_producer.push(Ok(part));
                             }
