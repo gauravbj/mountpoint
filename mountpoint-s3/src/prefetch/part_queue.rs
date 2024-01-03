@@ -115,8 +115,7 @@ impl<E: std::error::Error + Send + Sync> PartQueueProducer<E> {
 
 #[cfg(test)]
 mod tests {
-    use crate::checksums::ChecksummedBytes;
-    use crate::object::ObjectId;
+    use crate::object::{ChecksummedBytes, ObjectId};
 
     use super::*;
 
